@@ -101,9 +101,20 @@ jobs:
           export CGO_CFLAGS="-Wno-deprecated-declarations"
           if [ "${{ matrix.goos }}" = "darwin" ]; then
             export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+            go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
+              -o WeKnora-lite ./cmd/server
+          else
+            # ModelScope 部署：docreader 基座是 debian bookworm(glibc 2.36)，
+            # 在 golang:1.26-bookworm 容器内编译，保证二进制只依赖 glibc 2.36
+            docker run --rm -v "$PWD:/src" -w /src \
+              -e CGO_ENABLED=1 -e EDITION=lite -e LDFLAGS="${LDFLAGS}" \
+              -e CGO_CFLAGS="-Wno-deprecated-declarations" \
+              golang:1.26-bookworm bash -c '
+                git config --global --add safe.directory /src &&
+                go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
+                  -o WeKnora-lite ./cmd/server
+              '
           fi
-          go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
-            -o WeKnora-lite ./cmd/server
 
       - name: Package tarball
         run: |
