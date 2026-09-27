@@ -180,8 +180,17 @@ func Auth(
 	}
 }
 
-// bearerToken extracts the Bearer token from the Authorization header.
+// bearerToken extracts the Bearer token for the current request.
+//
+// Priority:
+//  1. X-WeKnora-Token header — deployments behind gateways that rewrite the
+//     standard Authorization header (e.g. ModelScope/EAS shared gateway) can
+//     carry the JWT in this custom header, which such gateways pass through.
+//  2. Standard Authorization: Bearer header (upstream behavior, unchanged).
 func bearerToken(c *gin.Context) (string, bool) {
+	if t := c.GetHeader("X-WeKnora-Token"); t != "" {
+		return t, true
+	}
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		return "", false
