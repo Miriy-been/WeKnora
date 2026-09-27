@@ -80,6 +80,9 @@ instance.interceptors.request.use(
       const token = localStorage.getItem('weknora_token');
       if (token) {
         config.headers["Authorization"] = `Bearer ${token}`;
+        // ModelScope/EAS 等平台网关会改写标准 Authorization 头；
+        // X- 前缀自定义头可原样穿透，服务端 bearerToken() 优先读取本头。
+        config.headers["Authorization"] = `Bearer ${token}`;
       }
     }
     
