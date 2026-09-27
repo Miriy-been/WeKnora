@@ -171,7 +171,8 @@ export function useStream() {
         method: params.method,
         headers: {
           "Content-Type": "application/json",
-          "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${authToken}`,
+          //"Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${authToken}`,
+		  ...(embedToken ? { "Authorization": `Embed ${embedToken}` } : { "X-WeKnora-Token": authToken }),
           "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
           "X-Request-ID": requestID,
           ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
