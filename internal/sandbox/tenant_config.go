@@ -141,6 +141,7 @@ func ResolveEffectiveConfig(
 		if local.PidsLimit > 0 {
 			effective.LocalPidsLimit = int64(local.PidsLimit)
 		}
+		effective.LocalAllowNetwork = local.AllowNetwork
 	}
 
 	switch effective.Type {
@@ -256,6 +257,7 @@ func clearProviderFields(cfg *Config) {
 	cfg.LocalCPULimit = 0
 	cfg.LocalMemoryBytes = 0
 	cfg.LocalPidsLimit = 0
+	cfg.LocalAllowNetwork = false
 	cfg.Network = RemoteNetworkPolicy{}
 }
 

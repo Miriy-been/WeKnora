@@ -479,6 +479,12 @@ type Config struct {
 	LocalCPULimit    float64
 	LocalMemoryBytes int64
 	LocalPidsLimit   int64
+
+	// LocalAllowNetwork drops the NEWNET clone flag for Local sandboxes when
+	// true: the jail then shares the WeKnora host's network stack so skills
+	// can reach the internet (the Docker backend's network_mode=bridge
+	// equivalent). Default false keeps the offline jail.
+	LocalAllowNetwork bool
 }
 
 // DefaultConfig returns a default sandbox configuration.

@@ -825,6 +825,17 @@ type LocalSandboxConfig struct {
 	// strands existing session sandboxes, so it is part of the config
 	// identity and changing it asks for confirmation in the UI.
 	RootfsBase string `json:"rootfs_base,omitempty"`
+
+	// AllowNetwork opts the sandbox OUT of the offline guarantee. Default
+	// (false, omitted) runs every sandbox in an empty network namespace —
+	// no interfaces, no routes, no DNS. When true, Exec drops only the
+	// NEWNET clone flag: the sandbox then shares the WeKnora host's network
+	// stack (the Docker backend's network_mode=bridge equivalent) so skills
+	// can pip-install dependencies and reach external services. Filesystem
+	// (chroot), user, PID and IPC isolation are unaffected either way.
+	// Flipping this is a deliberate security trade-off the admin sees as a
+	// warning in the UI.
+	AllowNetwork bool `json:"allow_network,omitempty"`
 }
 
 // VolumeMountConfig configures a shared volume mount into every sandbox

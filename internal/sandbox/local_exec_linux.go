@@ -92,12 +92,19 @@ func (c *LocalRemoteClient) Exec(
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = workDir
 	cmd.Env = c.buildEnv(local, req)
+	// The network namespace is the offline jail: dropped only when the admin
+	// explicitly allowed networking (the Docker backend's network_mode=bridge
+	// equivalent). Filesystem, user, PID, UTS and IPC isolation stay either
+	// way.
+	cloneflags := uintptr(syscall.CLONE_NEWUSER |
+		syscall.CLONE_NEWPID |
+		syscall.CLONE_NEWUTS |
+		syscall.CLONE_NEWIPC)
+	if !c.cfg.LocalAllowNetwork {
+		cloneflags |= syscall.CLONE_NEWNET
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWUSER |
-			syscall.CLONE_NEWPID |
-			syscall.CLONE_NEWNET |
-			syscall.CLONE_NEWUTS |
-			syscall.CLONE_NEWIPC,
+		Cloneflags: cloneflags,
 		UidMappings: []syscall.SysProcIDMap{
 			{ContainerID: 0, HostID: os.Getuid(), Size: 1},
 		},

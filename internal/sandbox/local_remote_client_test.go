@@ -350,6 +350,41 @@ func TestLocalSnapshot(t *testing.T) {
 	}
 }
 
+// TestLocalNetworkPolicyForcing pins the egress-policy contract: offline
+// (default) configs have AllowInternetAccess forced false no matter what the
+// admin stored, while allow_network configs keep the stored policy so the
+// deep egress probe runs for real.
+func TestLocalNetworkPolicyForcing(t *testing.T) {
+	online := true
+	newCfg := func(allowNetwork bool) *Config {
+		base := t.TempDir()
+		cfg := DefaultConfig()
+		cfg.Type = SandboxTypeLocal
+		cfg.LocalTemplatePath = t.TempDir()
+		cfg.LocalRootfsBase = base
+		cfg.LocalAllowNetwork = allowNetwork
+		cfg.Network.AllowInternetAccess = &online
+		t.Setenv(LocalBackendEnabledEnv, "true")
+		ClearLocalBackendEnabledOverride()
+		if _, err := NewLocalRemoteClient(cfg); err != nil {
+			t.Fatalf("NewLocalRemoteClient: %v", err)
+		}
+		return cfg
+	}
+
+	offlineCfg := newCfg(false)
+	if offlineCfg.Network.AllowInternetAccess == nil ||
+		*offlineCfg.Network.AllowInternetAccess {
+		t.Fatal("offline config must have AllowInternetAccess forced to false")
+	}
+
+	netCfg := newCfg(true)
+	if netCfg.Network.AllowInternetAccess == nil ||
+		!*netCfg.Network.AllowInternetAccess {
+		t.Fatal("allow_network config must keep the admin's stored policy")
+	}
+}
+
 func TestLocalBuildEnvNoHostLeakage(t *testing.T) {
 	client, _ := newLocalTestClient(t)
 	t.Setenv("SECRET_HOST_VALUE", "leak")

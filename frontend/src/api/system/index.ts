@@ -811,6 +811,8 @@ export interface SandboxLocalConfig {
   cpu_limit?: number
   pids_limit?: number
   rootfs_base?: string
+  /** Opts the sandbox out of the offline jail: shares the host network stack. */
+  allow_network?: boolean
 }
 
 /** One injected credential header on a Cube L7 rule. */

@@ -215,11 +215,25 @@
       <section v-if="currentStepKey === 'connection' && !isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionRuntimeEnvironment') }}</h4>
         <template v-if="backend === 'local'">
-          <t-alert theme="info" class="compact-alert" :message="$t('settings.sandbox.localOfflineTitle')">
+          <t-alert v-if="!local.allow_network" theme="info" class="compact-alert"
+            :message="$t('settings.sandbox.localOfflineTitle')">
             <template #description>
               <p>{{ $t('settings.sandbox.localOfflineHint') }}</p>
             </template>
           </t-alert>
+          <t-alert v-else theme="warning" class="compact-alert"
+            :message="$t('settings.sandbox.localAllowNetworkTitle')">
+            <template #description>
+              <p>{{ $t('settings.sandbox.localAllowNetworkHint') }}</p>
+            </template>
+          </t-alert>
+          <div class="private-endpoint-row">
+            <div>
+              <p class="private-endpoint-row__title">{{ $t('settings.sandbox.localAllowNetwork') }}</p>
+              <p class="section-help">{{ $t('settings.sandbox.localAllowNetworkHelp') }}</p>
+            </div>
+            <t-switch v-model="local.allow_network" />
+          </div>
           <t-form-item :label="$t('settings.sandbox.localRootfsBase')"
             :help="$t('settings.sandbox.localRootfsBaseHelp')">
             <t-input v-model="local.rootfs_base" placeholder="/var/tmp/weknora-sandbox" />
@@ -452,9 +466,16 @@
               </t-form-item>
             </template>
             <template v-else-if="backend === 'local'">
-              <t-alert theme="info" class="compact-alert" :message="$t('settings.sandbox.localOfflineTitle')">
+              <t-alert v-if="!local.allow_network" theme="info" class="compact-alert"
+                :message="$t('settings.sandbox.localOfflineTitle')">
                 <template #description>
                   <p>{{ $t('settings.sandbox.localNetworkHint') }}</p>
+                </template>
+              </t-alert>
+              <t-alert v-else theme="warning" class="compact-alert"
+                :message="$t('settings.sandbox.localAllowNetworkTitle')">
+                <template #description>
+                  <p>{{ $t('settings.sandbox.localAllowNetworkRuntimeHint') }}</p>
                 </template>
               </t-alert>
               <t-form-item :label="$t('settings.sandbox.localCpuLimit')"
