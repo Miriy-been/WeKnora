@@ -42,7 +42,11 @@ func newLocalTestClient(t *testing.T) (*LocalRemoteClient, *Config) {
 		if out, ierr := install.CombinedOutput(); ierr != nil {
 			t.Fatalf("fixture: busybox --install: %v: %s", ierr, out)
 		}
-		must(os.Symlink("busybox", filepath.Join(template, "bin", "sh")))
+		// --install normally creates sh itself; keep this only as a guard for
+		// builds whose applet list lacks it.
+		if err := os.Symlink("busybox", filepath.Join(template, "bin", "sh")); err != nil && !os.IsExist(err) {
+			t.Fatalf("fixture: symlink sh: %v", err)
+		}
 	} else {
 		must(os.WriteFile(filepath.Join(template, "bin", "sh"), []byte("#!/bin/busybox\n"), 0o755))
 	}
