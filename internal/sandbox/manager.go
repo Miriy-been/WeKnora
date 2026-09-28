@@ -47,7 +47,7 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = &disabledSandbox{}
 		return nil
 
-	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
 		// Session-scoped remote backends are only reachable through
 		// SessionBoundManager, which owns the authoritative binding.
 		// DefaultManager exposes stateless semantics that cannot preserve
@@ -221,9 +221,9 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 // NewManagerFromType creates a sandbox manager with the specified type.
 // dockerImage is optional; if empty, the default image is used.
 //
-// Session-scoped backends (Cube, E2B, Docker) route to SessionBoundManager,
-// which keeps one persistent sandbox per SessionID; Disabled routes to
-// DefaultManager. Both satisfy Manager.
+// Session-scoped backends (Cube, E2B, Docker, Local) route to
+// SessionBoundManager, which keeps one persistent sandbox per SessionID;
+// Disabled routes to DefaultManager. Both satisfy Manager.
 func NewManagerFromType(sandboxType string, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
@@ -233,6 +233,8 @@ func NewManagerFromType(sandboxType string, dockerImage string) (Manager, error)
 		sType = SandboxTypeCube
 	case "e2b":
 		sType = SandboxTypeE2B
+	case "local":
+		sType = SandboxTypeLocal
 	case "disabled", "":
 		sType = SandboxTypeDisabled
 	default:
@@ -260,6 +262,10 @@ func NewManagerFromType(sandboxType string, dockerImage string) (Manager, error)
 		applyDockerRuntimeDefaults(config)
 		if client, err = NewDockerRemoteClient(config); err != nil {
 			return nil, fmt.Errorf("sandbox: build Docker client: %w", err)
+		}
+	case SandboxTypeLocal:
+		if client, err = NewLocalRemoteClient(config); err != nil {
+			return nil, fmt.Errorf("sandbox: build Local client: %w", err)
 		}
 	}
 	if client == nil {

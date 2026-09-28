@@ -80,6 +80,14 @@ func IdentityOf(tenantCfg *types.TenantSandboxConfig) SandboxIdentity {
 			identity.APIURL = docker.Host
 			identity.APIKey = docker.TLSCertPath
 		}
+	case SandboxTypeLocal:
+		// The rootfs base directory is the data plane: session sandboxes are
+		// found by directory, so re-pointing it strands every sandbox the
+		// config has already created. There is no control plane — nothing
+		// external to authenticate against.
+		if local := tenantCfg.Local; local != nil {
+			identity.SandboxDomain = local.RootfsBase
+		}
 	}
 	return identity
 }

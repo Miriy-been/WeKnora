@@ -784,6 +784,7 @@ export interface SandboxConfig {
   cube?: SandboxCubeConfig
   e2b?: SandboxE2BConfig
   docker?: SandboxDockerConfig
+  local?: SandboxLocalConfig
 }
 
 /** Docker backend: one daemon, one long-lived container per session. */
@@ -798,6 +799,18 @@ export interface SandboxDockerConfig {
   runtime?: string
   idle_ttl_seconds?: number
   http_timeout_sec?: number
+}
+
+/**
+ * Local backend: one user-namespace + chroot jail per session, materialised
+ * from the image-baked template. Always offline; no endpoints or credentials
+ * — every field is an optional resource ceiling.
+ */
+export interface SandboxLocalConfig {
+  memory_limit_mb?: number
+  cpu_limit?: number
+  pids_limit?: number
+  rootfs_base?: string
 }
 
 /** One injected credential header on a Cube L7 rule. */
@@ -921,7 +934,7 @@ export interface SandboxInventory {
 }
 
 /** Sandbox backends managed as named workspace configurations. */
-export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b', 'docker'] as const
+export const NAMED_SANDBOX_BACKEND_TYPES = ['cube', 'e2b', 'docker', 'local'] as const
 
 export function isNamedSandboxBackend(type: string): boolean {
   return (NAMED_SANDBOX_BACKEND_TYPES as readonly string[]).includes(type)

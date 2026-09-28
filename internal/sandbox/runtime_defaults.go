@@ -53,3 +53,29 @@ func applyE2BRuntimeDefaults(cfg *Config) {
 		cfg.E2BHTTPTimeout = DefaultE2BHTTPTimeout
 	}
 }
+
+// applyLocalRuntimeDefaults fills the Local backend's paths and ceilings.
+// Unlike the Docker image, the template path IS defaulted here: it is baked
+// into the release at a fixed location and an admin has no way to discover
+// or override it through the form, so demanding it would be a constant the
+// config could never verify.
+func applyLocalRuntimeDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.LocalTemplatePath == "" {
+		cfg.LocalTemplatePath = DefaultLocalTemplatePath
+	}
+	if cfg.LocalRootfsBase == "" {
+		cfg.LocalRootfsBase = DefaultLocalRootfsBase
+	}
+	if cfg.LocalCPULimit <= 0 {
+		cfg.LocalCPULimit = DefaultLocalCPULimit
+	}
+	if cfg.LocalMemoryBytes <= 0 {
+		cfg.LocalMemoryBytes = DefaultLocalMemoryLimit
+	}
+	if cfg.LocalPidsLimit <= 0 {
+		cfg.LocalPidsLimit = DefaultLocalPidsLimit
+	}
+}

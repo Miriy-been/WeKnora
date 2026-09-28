@@ -47,6 +47,31 @@ jobs:
           path: frontend/dist/
           retention-days: 1
 
+  # ── 1b. Go checks: vet + Local sandbox backend unit tests ──
+  # The Local backend's jail needs unprivileged user namespaces, which
+  # ubuntu-24.04 runners support out of the box; busybox must be the STATIC
+  # variant because the test fixture runs it inside a chroot with no libs.
+  go-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install sqlite headers and static busybox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev busybox-static
+
+      - name: Vet
+        run: go vet ./internal/... ./cmd/...
+
+      - name: Test Local sandbox backend
+        run: go test -race -v -run 'TestLocal' ./internal/sandbox/
+
   # ── 2a. Build Web CLI binary per platform (native CGO) ──
   build-binary:
     needs: build-frontend

@@ -177,11 +177,14 @@ func (r *tenantSandboxResolver) Resolve(
 	if err := EnsureDockerBackendAllowed(effective.Type); err != nil {
 		return nil, err
 	}
+	if err := EnsureLocalBackendAllowed(effective.Type); err != nil {
+		return nil, err
+	}
 
 	switch effective.Type {
 	case SandboxTypeDisabled:
 		return NewDisabledManager(), nil
-	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
 		client, err := r.buildClient(effective)
 		if err != nil {
 			return nil, err
@@ -223,6 +226,10 @@ func (r *tenantSandboxResolver) buildClient(cfg *Config) (RemoteSandboxClient, e
 		// reached over a unix socket as often as over TCP. It installs the
 		// same guarded dialer for TCP endpoints (see newDockerEngineClient).
 		return NewDockerRemoteClient(cfg)
+	case SandboxTypeLocal:
+		// No transport at all: the "control plane" is the local filesystem,
+		// and the offline contract forbids network resources anyway.
+		return NewLocalRemoteClient(cfg)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q has no remote client", cfg.Type)
 	}
@@ -255,6 +262,11 @@ func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 			return nil, err
 		}
 		return NewDockerRemoteClientForCheck(cfg)
+	case SandboxTypeLocal:
+		if err := EnsureLocalBackendAllowed(SandboxTypeLocal); err != nil {
+			return nil, err
+		}
+		return NewLocalRemoteClient(cfg)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q cannot be probed", cfg.Type)
 	}

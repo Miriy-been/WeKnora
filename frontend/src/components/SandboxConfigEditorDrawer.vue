@@ -214,6 +214,18 @@
 
       <section v-if="currentStepKey === 'connection' && !isRemoteBackend" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionRuntimeEnvironment') }}</h4>
+        <template v-if="backend === 'local'">
+          <t-alert theme="info" class="compact-alert" :message="$t('settings.sandbox.localOfflineTitle')">
+            <template #description>
+              <p>{{ $t('settings.sandbox.localOfflineHint') }}</p>
+            </template>
+          </t-alert>
+          <t-form-item :label="$t('settings.sandbox.localRootfsBase')"
+            :help="$t('settings.sandbox.localRootfsBaseHelp')">
+            <t-input v-model="local.rootfs_base" placeholder="/var/tmp/weknora-sandbox" />
+          </t-form-item>
+        </template>
+        <template v-else>
         <div class="weknora-template-card is-active">
           <SandboxBackendBadge type="docker" />
           <div class="weknora-template-card__content">
@@ -255,6 +267,7 @@
             @change="invalidateConnection"
           />
         </div>
+        </template>
       </section>
 
       <section v-if="currentStepKey === 'template'" class="setting-drawer__section">
@@ -438,6 +451,28 @@
                   placeholder="512" />
               </t-form-item>
             </template>
+            <template v-else-if="backend === 'local'">
+              <t-alert theme="info" class="compact-alert" :message="$t('settings.sandbox.localOfflineTitle')">
+                <template #description>
+                  <p>{{ $t('settings.sandbox.localNetworkHint') }}</p>
+                </template>
+              </t-alert>
+              <t-form-item :label="$t('settings.sandbox.localCpuLimit')"
+                :tips="$t('settings.sandbox.localCpuLimitHelp')">
+                <t-input-number v-model="local.cpu_limit" :min="0" :step="0.5" theme="column"
+                  placeholder="1" />
+              </t-form-item>
+              <t-form-item :label="$t('settings.sandbox.localMemoryLimit')"
+                :tips="$t('settings.sandbox.localMemoryLimitHelp')">
+                <t-input-number v-model="local.memory_limit_mb" :min="0" theme="column"
+                  placeholder="512" />
+              </t-form-item>
+              <t-form-item :label="$t('settings.sandbox.localPidsLimit')"
+                :tips="$t('settings.sandbox.localPidsLimitHelp')">
+                <t-input-number v-model="local.pids_limit" :min="0" theme="column"
+                  placeholder="64" />
+              </t-form-item>
+            </template>
             <t-form-item :label="$t('settings.sandbox.defaultTimeout')"
               :tips="$t('settings.sandbox.defaultTimeoutHelp')">
               <t-input-number v-model="defaultTimeoutSec" :min="0" theme="column" placeholder="60" />
@@ -451,7 +486,7 @@
         </div>
       </section>
 
-      <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
+      <section v-if="currentStepKey === 'runtime' && backend !== 'local'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionNetwork') }}</h4>
         <p class="section-help section-help--under-title">
           {{ $t('settings.sandbox.networkHint') }}
@@ -720,7 +755,7 @@
         <div v-else class="env-empty">{{ $t('settings.sandbox.noEnvVars') }}</div>
       </section>
 
-      <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
+      <section v-if="currentStepKey === 'runtime' && backend !== 'local'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillRollout') }}</h4>
         <p class="section-help section-help--under-title">{{ $t('settings.sandbox.skillRolloutHint') }}</p>
         <t-radio-group v-model="skillRollout" class="skill-rollout-group">
@@ -781,6 +816,7 @@ import {
   type SandboxCubeConfig,
   type SandboxE2BConfig,
   type SandboxDockerConfig,
+  type SandboxLocalConfig,
   type SandboxNetworkPolicy,
   type SandboxTemplate,
   isNamedSandboxBackend,
@@ -847,6 +883,7 @@ const allowPrivateEndpoints = ref(false)
 const cube = reactive<SandboxCubeConfig>({})
 const e2b = reactive<SandboxE2BConfig>({})
 const docker = reactive<SandboxDockerConfig>({})
+const local = reactive<SandboxLocalConfig>({})
 // Tracks which secrets the tenant already has stored, so an empty input can
 // mean "keep the saved key" instead of "no key configured".
 const storedSecrets = reactive({ cube: false, e2b: false })
@@ -1091,6 +1128,9 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
   cube: ['api_url', 'proxy_url', 'sandbox_domain', 'template_id'],
   e2b: ['api_key', 'template_id'],
   docker: ['image'],
+  // Local has no endpoints or credentials: every field is an optional
+  // resource ceiling, so there is nothing to demand.
+  local: [],
 }
 
 const fieldErrors = ref<Record<string, string>>({})
@@ -1117,6 +1157,7 @@ function onConnectionInput(field: string) {
 function submittedBackendValues(): Record<string, unknown> {
   if (backend.value === 'cube') return withStoredSecret({ ...cube }, storedSecrets.cube)
   if (backend.value === 'e2b') return withStoredSecret({ ...e2b }, storedSecrets.e2b)
+  if (backend.value === 'local') return { ...local }
   return { ...docker }
 }
 
@@ -1158,9 +1199,11 @@ function reset() {
   Object.keys(cube).forEach((key) => delete (cube as Record<string, unknown>)[key])
   Object.keys(e2b).forEach((key) => delete (e2b as Record<string, unknown>)[key])
   Object.keys(docker).forEach((key) => delete (docker as Record<string, unknown>)[key])
+  Object.keys(local).forEach((key) => delete (local as Record<string, unknown>)[key])
   Object.assign(cube, cfg.cube || {})
   Object.assign(e2b, cfg.e2b || {})
   Object.assign(docker, cfg.docker || {})
+  Object.assign(local, cfg.local || {})
   if (!Array.isArray(cube.dns_servers)) cube.dns_servers = []
   if (backend.value === 'docker' && !docker.image) {
     docker.image = defaultDockerImage
@@ -1555,6 +1598,7 @@ function collectPayload(): SandboxConfig {
   if (backend.value === 'cube') payload.cube = withStoredSecret({ ...cube }, storedSecrets.cube)
   if (backend.value === 'e2b') payload.e2b = withStoredSecret({ ...e2b }, storedSecrets.e2b)
   if (backend.value === 'docker') payload.docker = { ...docker }
+  if (backend.value === 'local') payload.local = { ...local }
   return payload
 }
 
@@ -1562,8 +1606,9 @@ function collectPayload(): SandboxConfig {
 // admin never touched serializes to the same thing as a fresh default.
 function collectNetworkPolicy(): SandboxNetworkPolicy {
   const policy: SandboxNetworkPolicy = {}
-  // Docker can only honour network_mode on the docker block.
-  if (backend.value === 'docker') {
+  // Docker can only honour network_mode on the docker block; Local is
+  // always offline, so there is no egress policy to express at all.
+  if (backend.value === 'docker' || backend.value === 'local') {
     return policy
   }
   if (denyEgressByDefault.value) policy.deny_egress_by_default = true

@@ -129,13 +129,11 @@
             </svg>
           </span>
         </div>
-        <template v-if="!authStore.isLiteMode">
-          <div class="menu-divider"></div>
-          <div class="menu-item danger" @click="handleLogout">
-            <t-icon name="logout" class="menu-icon" />
-            <span>{{ $t('auth.logout') }}</span>
-          </div>
-        </template>
+        <div class="menu-divider"></div>
+        <div class="menu-item danger" @click="handleLogout">
+          <t-icon name="logout" class="menu-icon" />
+          <span>{{ $t('auth.logout') }}</span>
+        </div>
       </div>
     </Transition>
 

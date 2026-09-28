@@ -360,6 +360,9 @@ func SanitizeSandboxConfig(
 		if err := sandbox.EnsureDockerBackendAllowed(parsed); err != nil {
 			return nil, err
 		}
+		if err := sandbox.EnsureLocalBackendAllowed(parsed); err != nil {
+			return nil, err
+		}
 	}
 	if merged.Cube != nil {
 		dns, err := sandbox.NormalizeCubeDNSServers(merged.Cube.DNSServers)
@@ -418,7 +421,11 @@ func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
 	if !sandbox.IsNamedSandboxBackendType(cfg.SandboxType) {
 		return fmt.Errorf("%w", ErrNamedSandboxBackendUnsupported)
 	}
-	return sandbox.EnsureDockerBackendAllowed(sandbox.SandboxType(cfg.SandboxType))
+	parsed := sandbox.SandboxType(cfg.SandboxType)
+	if err := sandbox.EnsureDockerBackendAllowed(parsed); err != nil {
+		return err
+	}
+	return sandbox.EnsureLocalBackendAllowed(parsed)
 }
 
 func filterPublicSandboxConfigs(
@@ -1534,7 +1541,7 @@ func (s *TenantSandboxConfigService) clientFor(
 		return nil, err
 	}
 	switch effective.Type {
-	case sandbox.SandboxTypeCube, sandbox.SandboxTypeE2B, sandbox.SandboxTypeDocker:
+	case sandbox.SandboxTypeCube, sandbox.SandboxTypeE2B, sandbox.SandboxTypeDocker, sandbox.SandboxTypeLocal:
 		return s.newClient(effective)
 	default:
 		return nil, nil

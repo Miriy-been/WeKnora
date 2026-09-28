@@ -698,6 +698,7 @@ type TenantSandboxConfig struct {
 	Cube   *CubeSandboxConfig   `json:"cube,omitempty"`
 	E2B    *E2BSandboxConfig    `json:"e2b,omitempty"`
 	Docker *DockerSandboxConfig `json:"docker,omitempty"`
+	Local  *LocalSandboxConfig  `json:"local,omitempty"`
 }
 
 // CubeSandboxConfig addresses one CubeSandbox deployment. APIURL, ProxyURL,
@@ -796,6 +797,34 @@ type DockerSandboxConfig struct {
 
 	// HTTPTimeoutSec bounds each Engine API call. 0 uses the built-in default.
 	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`
+}
+
+// LocalSandboxConfig configures the built-in process-level Local backend: one
+// user-namespace + chroot sandbox per session, materialised on local disk from
+// the image-baked template. There are no endpoints or credentials to fill in —
+// every field is an optional resource ceiling and falls back to the built-in
+// default when omitted. The backend is always offline (its own empty network
+// namespace), so there is deliberately no network toggle here: sharing the
+// host's network stack instead would erase the isolation the backend exists
+// to provide.
+type LocalSandboxConfig struct {
+	// MemoryLimitMB caps one sandbox's memory (RLIMIT_AS plus a cgroup v1
+	// memory limit when writable). 0 uses the built-in default.
+	MemoryLimitMB int `json:"memory_limit_mb,omitempty"`
+
+	// CPULimit is the number of CPU cores one sandbox may use (RLIMIT_CPU
+	// plus a cgroup v1 cpu quota when writable). 0 uses the built-in default.
+	CPULimit float64 `json:"cpu_limit,omitempty"`
+
+	// PidsLimit caps how many processes one sandbox may run (RLIMIT_NPROC
+	// plus a cgroup v1 pids limit when writable). 0 uses the built-in default.
+	PidsLimit int `json:"pids_limit,omitempty"`
+
+	// RootfsBase is the parent directory session sandbox rootfs directories
+	// are materialised under. Empty uses the built-in default. Re-pointing it
+	// strands existing session sandboxes, so it is part of the config
+	// identity and changing it asks for confirmation in the UI.
+	RootfsBase string `json:"rootfs_base,omitempty"`
 }
 
 // VolumeMountConfig configures a shared volume mount into every sandbox

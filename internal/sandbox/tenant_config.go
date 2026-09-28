@@ -127,6 +127,22 @@ func ResolveEffectiveConfig(
 		overrideSeconds(&effective.DockerHTTPTimeout, docker.HTTPTimeoutSec)
 	}
 
+	if local := tenantCfg.Local; local != nil {
+		if local.MemoryLimitMB < 0 || local.CPULimit < 0 || local.PidsLimit < 0 {
+			return nil, fmt.Errorf("%w: local limits cannot be negative", ErrSandboxConfigIncomplete)
+		}
+		overrideString(&effective.LocalRootfsBase, local.RootfsBase)
+		if local.CPULimit > 0 {
+			effective.LocalCPULimit = local.CPULimit
+		}
+		if local.MemoryLimitMB > 0 {
+			effective.LocalMemoryBytes = int64(local.MemoryLimitMB) * 1024 * 1024
+		}
+		if local.PidsLimit > 0 {
+			effective.LocalPidsLimit = int64(local.PidsLimit)
+		}
+	}
+
 	switch effective.Type {
 	case SandboxTypeCube:
 		applyCubeRuntimeDefaults(&effective)
@@ -134,6 +150,8 @@ func ResolveEffectiveConfig(
 		applyE2BRuntimeDefaults(&effective)
 	case SandboxTypeDocker:
 		applyDockerRuntimeDefaults(&effective)
+	case SandboxTypeLocal:
+		applyLocalRuntimeDefaults(&effective)
 	}
 	// A skill snapshot is a template ID (Cube/E2B) or an image tag (Docker),
 	// so overriding that field here is the entire session-side change.
@@ -223,6 +241,12 @@ func clearProviderFields(cfg *Config) {
 	cfg.E2BTemplate = ""
 	cfg.E2BSandboxTTL = 0
 	cfg.E2BHTTPTimeout = 0
+
+	cfg.LocalTemplatePath = ""
+	cfg.LocalRootfsBase = ""
+	cfg.LocalCPULimit = 0
+	cfg.LocalMemoryBytes = 0
+	cfg.LocalPidsLimit = 0
 	cfg.Network = RemoteNetworkPolicy{}
 }
 
@@ -242,6 +266,8 @@ func ParseSandboxType(raw string) (SandboxType, error) {
 		return SandboxTypeE2B, nil
 	case SandboxTypeDocker:
 		return SandboxTypeDocker, nil
+	case SandboxTypeLocal:
+		return SandboxTypeLocal, nil
 	case SandboxTypeHost:
 		return SandboxTypeHost, nil
 	case SandboxTypeDisabled:
@@ -265,6 +291,10 @@ func EffectiveTemplateID(cfg *Config) string {
 		// The image is what a template ID is for the MicroVM backends: the
 		// pre-baked filesystem a sandbox starts from.
 		return cfg.DockerImage
+	case SandboxTypeLocal:
+		// Same reasoning: the read-only template rootfs is the filesystem a
+		// session sandbox starts from.
+		return cfg.LocalTemplatePath
 	default:
 		return ""
 	}

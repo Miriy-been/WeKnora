@@ -30,6 +30,18 @@ const (
 	// bare host processes with no isolation at all, and reusing that name
 	// would misrepresent this one.
 	SandboxTypeHost SandboxType = "host"
+	// SandboxTypeLocal runs each session's scripts inside a user-namespace +
+	// chroot sandbox built from Go's os/exec SysProcAttr alone — no external
+	// runtime. Unlike the removed bare-host Local backend, every process gets
+	// NEWUSER|NEWPID|NEWNET|NEWUTS|NEWIPC namespaces, a private rootfs copied
+	// from a read-only template, and rlimit/cgroup resource ceilings, and it
+	// is always offline (empty network namespace). It shares the host kernel,
+	// so it isolates less than Docker or the MicroVM backends; it exists for
+	// deployments (shared PaaS containers without a Docker socket) where no
+	// stronger backend can run at all. Like Docker it keeps session state
+	// between executions on local disk, and it is gated behind
+	// WEKNORA_SANDBOX_LOCAL_ENABLED like the Docker backend.
+	SandboxTypeLocal SandboxType = "local"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
@@ -40,7 +52,7 @@ const (
 // resolveSandboxForExecution.
 func IsNamedSandboxBackendType(raw string) bool {
 	switch SandboxType(raw) {
-	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
 		return true
 	default:
 		return false
@@ -78,6 +90,29 @@ const (
 	// DefaultCubeDesktopTemplateImage is DefaultDesktopDockerImage plus Cube
 	// envd (target "desktop-cube"). amd64 only, same reason as the cube target.
 	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
+
+	// DefaultLocalTemplatePath is the read-only rootfs template the Local
+	// backend copies each session sandbox from. The release image bakes it
+	// at build time (a python + busybox userspace with a static /dev).
+	DefaultLocalTemplatePath = "/sandbox-rootfs"
+
+	// DefaultLocalRootfsBase is the parent directory Local session sandboxes
+	// are materialised under. It lives on the container's ephemeral layer by
+	// default: copying is fast and sessions are short-lived, and a restart
+	// re-provisions instead of slowly restoring megabytes over a network FS.
+	DefaultLocalRootfsBase = "/var/tmp/weknora-sandbox"
+
+	// DefaultLocalMemoryLimit / DefaultLocalCPULimit / DefaultLocalPidsLimit
+	// cap one Local sandbox. They map onto RLIMIT_AS / RLIMIT_CPU (plus a
+	// cgroup v1 memory+cpu best-effort) and RLIMIT_NPROC.
+	DefaultLocalMemoryLimit = 512 * 1024 * 1024 // 512MB
+	DefaultLocalCPULimit    = 1.0               // 1 CPU core
+	DefaultLocalPidsLimit   = 64
+
+	// LocalOrphanSandboxTTL is how long an unused Local sandbox directory may
+	// sit unreferenced before the startup sweep removes it. Generous because
+	// the directories are plain disk usage, not running processes.
+	LocalOrphanSandboxTTL = 7 * 24 * time.Hour
 
 	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials
 	// it through the provider gateway (Host "{port}-{id}.{domain}"), not by
@@ -428,6 +463,22 @@ type Config struct {
 	// E2BHTTPTimeout bounds ordinary E2B HTTP calls, including response bodies.
 	// Command streams use their execution timeout instead.
 	E2BHTTPTimeout time.Duration
+
+	// LocalTemplatePath is the read-only rootfs template Local sandboxes are
+	// copied from. Only used when Type == SandboxTypeLocal.
+	LocalTemplatePath string
+
+	// LocalRootfsBase is the parent directory session sandbox rootfs
+	// directories are materialised under. Re-pointing it strands existing
+	// session sandboxes (they are found by directory, not re-created), so it
+	// is part of the config identity.
+	LocalRootfsBase string
+
+	// LocalCPULimit / LocalMemoryBytes / LocalPidsLimit cap one Local sandbox.
+	// Zero uses the built-in defaults.
+	LocalCPULimit    float64
+	LocalMemoryBytes int64
+	LocalPidsLimit   int64
 }
 
 // DefaultConfig returns a default sandbox configuration.
@@ -455,7 +506,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeHost, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeLocal, SandboxTypeHost, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

@@ -170,6 +170,8 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		applyE2BRuntimeDefaults(cfg)
 	case SandboxTypeDocker:
 		applyDockerRuntimeDefaults(cfg)
+	case SandboxTypeLocal:
+		applyLocalRuntimeDefaults(cfg)
 	}
 
 	// Build the provider-specific neutral create request using the
@@ -1618,6 +1620,22 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 				// host, so pausing an abandoned sandbox would reclaim nothing.
 				// Idle containers are deleted; the lifecycle rebinds the
 				// session exactly as it does for a provider-reaped sandbox.
+				Action:     RemoteOnTimeoutKill,
+				AutoResume: false,
+			},
+		}, nil
+
+	case SandboxTypeLocal:
+		// The template is the read-only rootfs the adapter copies. Like
+		// Docker there is no pause semantics: reclamation is a directory
+		// delete, and the adapter ignores the timeout policy entirely (the
+		// orphan sweep, not a provider TTL, bounds a sandbox's life).
+		return RemoteCreateRequest{
+			TemplateID: cfg.LocalTemplatePath,
+			EnvVars:    envVars,
+			Network:    cfg.Network,
+			Timeout: RemoteTimeoutPolicy{
+				Mode:       RemoteTimeoutServerDefault,
 				Action:     RemoteOnTimeoutKill,
 				AutoResume: false,
 			},

@@ -672,7 +672,7 @@ var (
 
 func isRemoteProvider(provider RemoteProvider) bool {
 	switch provider {
-	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker, SandboxTypeLocal:
 		return true
 	default:
 		return false
