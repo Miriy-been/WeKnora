@@ -364,6 +364,13 @@ func (h *SystemHandler) probeSandboxEgress(
 	policy sandbox.RemoteNetworkPolicy,
 	result *SandboxCheckResponse,
 ) {
+	// An offline-by-policy config (the Local backend is ALWAYS offline) must
+	// skip the probe entirely: running it would only report a tooling error
+	// ("curl: not found") instead of the meaningful verdict.
+	if policy.DeniesEgressByDefault() {
+		result.skip("egress_available", skipReasonEgressRestrictedByPolicy)
+		return
+	}
 	// Echo which target succeeded so the UI message is actionable when
 	// only one region is reachable. First success exits 0 immediately.
 	var b strings.Builder

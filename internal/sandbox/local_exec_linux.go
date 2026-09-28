@@ -128,8 +128,11 @@ func (c *LocalRemoteClient) Exec(
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
+		// The raw error text (fork/exec ...: EPERM/ENOENT/EACCES) is what
+		// pinpoints which jail layer failed — clone, uid map, chroot, chdir
+		// or execve all surface here. Never wrap it away.
 		return nil, localErrWrapped("Exec", RemoteErrorKindUnavailable, err,
-			"start jailed process (template %s)", c.cfg.LocalTemplatePath)
+			"start jailed process: %v (template %s)", err, c.cfg.LocalTemplatePath)
 	}
 
 	// Write the pid into the freshly created cgroups (best-effort). There is

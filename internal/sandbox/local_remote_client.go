@@ -81,15 +81,15 @@ func NewLocalRemoteClient(cfg *Config) (*LocalRemoteClient, error) {
 		return nil, err
 	}
 	applyLocalRuntimeDefaults(cfg)
-	if !cfg.AllowPrivateEndpoints {
-		// Force the offline contract even on a hand-built config that skipped
-		// ResolveEffectiveConfig. DeniesEgressByDefault and the deep
-		// connectivity probe read this field.
-		allow := false
-		if cfg.Network.AllowInternetAccess == nil {
-			cfg.Network.AllowInternetAccess = &allow
-		}
-	}
+	// Unconditionally force the offline contract, even on a hand-built
+	// config that skipped ResolveEffectiveConfig. A nil-check here would
+	// leak through: the resolver materialises AllowInternetAccess=&true by
+	// default, and the jail has no network stack to grant regardless —
+	// DeniesEgressByDefault and the deep connectivity probe read this field.
+	offline := false
+	public := false
+	cfg.Network.AllowInternetAccess = &offline
+	cfg.Network.AllowPublicTraffic = &public
 	// The sweep is cooldown-guarded at package level, so calling it on every
 	// construction is cheap and self-heals unreferenced session directories.
 	client := &LocalRemoteClient{cfg: cfg}
