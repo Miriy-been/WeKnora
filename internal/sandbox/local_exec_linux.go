@@ -264,10 +264,13 @@ func (c *LocalRemoteClient) ulimitPrefix(timeout time.Duration) string {
 // root after SysProcAttr.Chroot is applied.
 func localLookPath(rootfs, command string) (string, error) {
 	if strings.ContainsRune(command, '/') {
-		clean := filepath.Clean("/" + strings.TrimPrefix(command, "/"))
-		if strings.Contains(clean, "..") {
-			return "", fmt.Errorf("command path %q escapes the sandbox", command)
+		// Refuse ".." components before Clean can collapse them.
+		for _, part := range strings.Split(filepath.ToSlash(command), "/") {
+			if part == ".." {
+				return "", fmt.Errorf("command path %q escapes the sandbox", command)
+			}
 		}
+		clean := filepath.Clean("/" + strings.TrimPrefix(command, "/"))
 		if _, err := os.Stat(filepath.Join(rootfs, clean)); err != nil {
 			return "", fmt.Errorf("executable %s not found in sandbox", command)
 		}
@@ -289,11 +292,14 @@ func (c *LocalRemoteClient) resolveWorkDir(handle *LocalSandboxHandle, workDir s
 	if strings.TrimSpace(workDir) == "" {
 		return localJailWorkspace, nil
 	}
-	clean := filepath.Clean("/" + strings.TrimPrefix(filepath.ToSlash(workDir), "/"))
-	if strings.Contains(clean, "..") {
-		return "", localErr("Exec", RemoteErrorKindInvalidRequest,
-			"workdir %q escapes the sandbox", workDir)
+	// Refuse ".." components before Clean can collapse them.
+	for _, part := range strings.Split(filepath.ToSlash(workDir), "/") {
+		if part == ".." {
+			return "", localErr("Exec", RemoteErrorKindInvalidRequest,
+				"workdir %q escapes the sandbox", workDir)
+		}
 	}
+	clean := filepath.Clean("/" + strings.TrimPrefix(filepath.ToSlash(workDir), "/"))
 	if fi, err := os.Stat(filepath.Join(handle.rootfs, clean)); err != nil || !fi.IsDir() {
 		return "", localErr("Exec", RemoteErrorKindInvalidRequest,
 			"workdir %s does not exist in the sandbox", workDir)
@@ -383,13 +389,25 @@ func (c *LocalRemoteClient) applyCgroupLimits(handle *LocalSandboxHandle) (func(
 }
 
 // checkUserNamespaceSupport reports whether unprivileged user namespaces are
-// available. Debian exposes the hard off-switch as
-// /proc/sys/kernel/unprivileged_userns_clone=0; the generic pool size lives
-// at /proc/sys/user/max_user_namespaces.
+// available. Three known blockers, each with a name so the operator can act:
+//   - Debian's hard off-switch: /proc/sys/kernel/unprivileged_userns_clone=0
+//   - Ubuntu 23.10+'s AppArmor restriction (default ON on 24.04):
+//     kernel.apparmor_restrict_unprivileged_userns=1 — every process without
+//     an allowing AppArmor profile gets EPERM from CLONE_NEWUSER. Fix with
+//     `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` or an
+//     AppArmor profile for the WeKnora binary.
+//   - the generic pool: /proc/sys/user/max_user_namespaces <= 0
 func checkUserNamespaceSupport() error {
 	if blob, err := os.ReadFile("/proc/sys/kernel/unprivileged_userns_clone"); err == nil {
 		if strings.TrimSpace(string(blob)) == "0" {
 			return fmt.Errorf("unprivileged_userns_clone is disabled")
+		}
+	}
+	if blob, err := os.ReadFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"); err == nil {
+		if strings.TrimSpace(string(blob)) == "1" {
+			return fmt.Errorf(
+				"AppArmor restricts unprivileged user namespaces (Ubuntu 23.10+ default); " +
+					"run: sysctl -w kernel.apparmor_restrict_unprivileged_userns=0")
 		}
 	}
 	if blob, err := os.ReadFile("/proc/sys/user/max_user_namespaces"); err == nil {

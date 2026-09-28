@@ -496,9 +496,9 @@ func (c *LocalRemoteClient) summaryOf(handle *LocalSandboxHandle) *RemoteSandbox
 	return summary
 }
 
-// resolveInside maps a sandbox-absolute path onto the host rootfs. The
-// leading-slash clean forbids traversal: Clean("/../etc") collapses to
-// "/etc", so the result can never escape the rootfs prefix.
+// resolveInside maps a sandbox-absolute path onto the host rootfs. Paths
+// containing any ".." component are refused outright (before Clean can
+// silently collapse them), so the result can never escape the rootfs prefix.
 func (c *LocalRemoteClient) resolveInside(
 	handle RemoteSandboxHandle,
 	op string,
@@ -511,10 +511,16 @@ func (c *LocalRemoteClient) resolveInside(
 	if local.rootfs == "" {
 		return "", "", localErr(op, RemoteErrorKindInvalidRequest, "handle has no rootfs")
 	}
-	clean := filepath.Clean("/" + strings.TrimPrefix(filepath.ToSlash(path), "/"))
-	if strings.Contains(clean, "..") {
-		return "", "", localErr(op, RemoteErrorKindInvalidRequest, "path %q escapes the sandbox", path)
+	// Component-level traversal check BEFORE Clean: filepath.Clean silently
+	// collapses "/../x" onto "/x", so a Clean-based check would silently
+	// accept (and rewrite) escape attempts instead of refusing them.
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return "", "", localErr(op, RemoteErrorKindInvalidRequest,
+				"path %q escapes the sandbox", path)
+		}
 	}
+	clean := filepath.Clean("/" + strings.TrimPrefix(filepath.ToSlash(path), "/"))
 	return local.rootfs, filepath.Join(local.rootfs, clean), nil
 }
 

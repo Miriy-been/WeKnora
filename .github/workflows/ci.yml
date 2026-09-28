@@ -50,6 +50,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev busybox-static
 
+      # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor
+      # (default ON on 24.04); without this, CLONE_NEWUSER fails with EPERM.
+      # The ModelScope target kernel has no AppArmor and is unaffected.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Vet
         run: go vet ./internal/... ./cmd/...
 
