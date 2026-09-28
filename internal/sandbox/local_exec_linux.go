@@ -238,6 +238,14 @@ func (c *LocalRemoteClient) buildArgv(handle *LocalSandboxHandle, req RemoteExec
 	return args, nil
 }
 
+// localMinRlimitNproc compensates for RLIMIT_NPROC's per-real-uid semantics:
+// the kernel counts EVERY process of the host uid this sandbox maps back to
+// (WeKnora itself, nginx, docreader, ...), not just the sandbox's. The
+// precise per-sandbox process ceiling is the cgroup pids.max controller; the
+// rlimit is only the fallback layer when cgroups are not writable, so it
+// must leave headroom for the host's own processes.
+const localMinRlimitNproc = 256
+
 // ulimitPrefix renders the rlimit shell builtins. RLIMIT_CPU derives from the
 // effective timeout — the wall-clock kill is the primary guard, the CPU
 // limit is the second line against a busy loop that somehow survives it.
@@ -248,7 +256,11 @@ func (c *LocalRemoteClient) ulimitPrefix(timeout time.Duration) string {
 		parts = append(parts, "ulimit -v "+strconv.FormatInt(c.cfg.LocalMemoryBytes/1024, 10))
 	}
 	if c.cfg.LocalPidsLimit > 0 {
-		parts = append(parts, "ulimit -u "+strconv.FormatInt(c.cfg.LocalPidsLimit, 10))
+		nproc := int(c.cfg.LocalPidsLimit)
+		if nproc < localMinRlimitNproc {
+			nproc = localMinRlimitNproc
+		}
+		parts = append(parts, "ulimit -u "+strconv.Itoa(nproc))
 	}
 	if c.cfg.LocalCPULimit > 0 {
 		cpuSeconds := int(c.cfg.LocalCPULimit*timeout.Seconds()) + 5

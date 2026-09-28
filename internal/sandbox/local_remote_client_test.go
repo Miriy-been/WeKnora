@@ -242,7 +242,10 @@ func TestLocalUlimitPrefix(t *testing.T) {
 	prefix := client.ulimitPrefix(60 * time.Second)
 	for _, want := range []string{
 		"ulimit -v " + strconv.FormatInt(256*1024, 10),
-		"ulimit -u 32",
+		// PidsLimit=32 is below the per-real-uid floor: the kernel counts the
+		// host uid's own processes against RLIMIT_NPROC, so the rlimit layer
+		// must not go under localMinRlimitNproc.
+		"ulimit -u " + strconv.Itoa(localMinRlimitNproc),
 		"ulimit -t 35",
 	} {
 		if !strings.Contains(prefix, want) {
