@@ -48,18 +48,13 @@ import (
 	"time"
 )
 
-// localJailPath is the argv[0] wrapper shell inside the rootfs. The template
+// localJailShell is the argv[0] wrapper shell inside the rootfs. The template
 // build installs busybox with /bin/sh wired up.
 const localJailShell = "/bin/sh"
 
 // localJailWorkspace is the default working directory inside the jail,
 // matching remoteScriptDir on the other backends.
 const localJailWorkspace = "/workspace"
-
-// localDefaultFileSizeLimit is the RLIMIT_FSIZE ceiling for one Exec, in
-// bytes, bounding a runaway script's output files. Generous on purpose; the
-// point is a cap, not a quota.
-const localDefaultFileSizeLimit = 512 * 1024 * 1024
 
 // Exec runs req's command inside the jail. See RemoteSandboxClient.Exec for
 // the Shell/Args contract.
@@ -85,7 +80,7 @@ func (c *LocalRemoteClient) Exec(
 			"Shell=true combined with Args is not a valid request")
 	}
 
-	argv, err := c.buildArgv(local, req)
+	argv, err := c.buildArgv(local, req, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +110,7 @@ func (c *LocalRemoteClient) Exec(
 		Chroot:  local.rootfs,
 	}
 
-	apply, attach, cleanup := c.applyCgroupLimits(local)
+	attach, cleanup := c.applyCgroupLimits(local)
 	defer cleanup()
 
 	stdin, err := cmd.StdinPipe()
@@ -221,7 +216,7 @@ func (c *LocalRemoteClient) Exec(
 // jail's own /bin/sh (busybox ash), applies the ceilings, then execs the
 // real command so the limits survive the image swap. Every ulimit operand is
 // a number this function generates — script content never reaches the prefix.
-func (c *LocalRemoteClient) buildArgv(handle *LocalSandboxHandle, req RemoteExecRequest) ([]string, error) {
+func (c *LocalRemoteClient) buildArgv(handle *LocalSandboxHandle, req RemoteExecRequest, timeout time.Duration) ([]string, error) {
 	var target []string
 	if req.Shell {
 		target = []string{localJailShell, "-c", req.Command}
@@ -253,7 +248,7 @@ func (c *LocalRemoteClient) ulimitPrefix(timeout time.Duration) string {
 		parts = append(parts, "ulimit -v "+strconv.FormatInt(c.cfg.LocalMemoryBytes/1024, 10))
 	}
 	if c.cfg.LocalPidsLimit > 0 {
-		parts = append(parts, "ulimit -u "+strconv.Itoa(c.cfg.LocalPidsLimit))
+		parts = append(parts, "ulimit -u "+strconv.FormatInt(c.cfg.LocalPidsLimit, 10))
 	}
 	if c.cfg.LocalCPULimit > 0 {
 		cpuSeconds := int(c.cfg.LocalCPULimit*timeout.Seconds()) + 5
@@ -369,7 +364,7 @@ func (c *LocalRemoteClient) applyCgroupLimits(handle *LocalSandboxHandle) (func(
 	}
 	if c.cfg.LocalPidsLimit > 0 {
 		register("pids", map[string]string{
-			"pids.max": strconv.Itoa(c.cfg.LocalPidsLimit),
+			"pids.max": strconv.FormatInt(c.cfg.LocalPidsLimit, 10),
 		})
 	}
 	attach := func(pid int) {

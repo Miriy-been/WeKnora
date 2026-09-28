@@ -1,0 +1,76 @@
+name: CI
+
+# Lightweight code-quality gate, split out from release-lite.yml (whose
+# multi-platform build matrix is too heavy to run on every push).
+#
+#   - go-check:        vet compiles every Go package (CGO included) and the
+#                      Local sandbox backend's jail tests run for real —
+#                      ubuntu-24.04 supports unprivileged user namespaces, and
+#                      busybox must be the STATIC variant because the fixture
+#                      runs it inside a chroot with no libraries.
+#   - frontend-check:  a full npm build, which type-checks the Vue app.
+#
+# Each job only runs when its own tree changed, so a docs-only push skips both.
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "22"
+
+jobs:
+  go-check:
+    runs-on: ubuntu-24.04
+    paths-ignore:
+      - "frontend/**"
+      - "**.md"
+      - ".github/workflows/ci.yml"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install sqlite headers and static busybox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev busybox-static
+
+      - name: Vet
+        run: go vet ./internal/... ./cmd/...
+
+      - name: Test Local sandbox backend
+        run: go test -race -run 'TestLocal' ./internal/sandbox/
+
+  frontend-check:
+    runs-on: ubuntu-latest
+    paths:
+      - "frontend/**"
+      - ".github/workflows/ci.yml"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build (includes type check)
+        working-directory: frontend
+        run: npm run build

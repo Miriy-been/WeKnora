@@ -92,13 +92,13 @@ func NewLocalRemoteClient(cfg *Config) (*LocalRemoteClient, error) {
 	}
 	// The sweep is cooldown-guarded at package level, so calling it on every
 	// construction is cheap and self-heals unreferenced session directories.
-	if base, err := c.rootfsPath(); err == nil {
+	client := &LocalRemoteClient{cfg: cfg}
+	if base, err := client.rootfsPath(); err == nil {
 		maybeSweepLocalOrphans(base, LocalOrphanSandboxTTL)
 	}
-	return &LocalRemoteClient{cfg: cfg}, nil
+	return client, nil
 }
 
-// errorsNewLocal is a tiny local alias so the import block stays small.
 func localErr(op string, kind RemoteErrorKind, format string, args ...any) error {
 	return NewRemoteError(SandboxTypeLocal, op, kind, fmt.Sprintf(format, args...), nil)
 }
@@ -267,7 +267,7 @@ func (c *LocalRemoteClient) List(
 		if !localFilterMatches(filter, summary) {
 			continue
 		}
-		summaries = append(summaries, summary)
+		summaries = append(summaries, *summary)
 	}
 	return summaries, nil
 }
