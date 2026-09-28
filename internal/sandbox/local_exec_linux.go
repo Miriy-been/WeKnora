@@ -256,14 +256,37 @@ func (c *LocalRemoteClient) buildArgv(handle *LocalSandboxHandle, req RemoteExec
 // must leave headroom for the host's own processes.
 const localMinRlimitNproc = 256
 
+// localRlimitASFloor is the minimum RLIMIT_AS rendered into the jail. JIT
+// runtimes (Node/V8, the JVM) legitimately reserve virtual address space far
+// beyond resident memory — V8 aborts with "Failed to reserve virtual memory
+// for CodeRange" the moment -v approaches its startup reservations (up to a
+// 4 GiB virtual cage on pointer-compressed builds; empirically even the
+// non-compressed build OOMs under a 512 MiB ceiling). The real memory hard
+// cap is the cgroup memory controller; RLIMIT_AS only matters as the
+// fallback layer when cgroups are not writable.
+const localRlimitASFloor = int64(8) * 1024 * 1024 * 1024
+
+// localRlimitASBytes derives the address-space ceiling from the configured
+// memory limit: 8x, floored at localRlimitASFloor, so virtual reservations
+// never block a workload whose resident memory the cgroup cap still contains.
+func localRlimitASBytes(memoryBytes int64) int64 {
+	if as := memoryBytes * 8; as > localRlimitASFloor {
+		return as
+	}
+	return localRlimitASFloor
+}
+
 // ulimitPrefix renders the rlimit shell builtins. RLIMIT_CPU derives from the
 // effective timeout — the wall-clock kill is the primary guard, the CPU
 // limit is the second line against a busy loop that somehow survives it.
 func (c *LocalRemoteClient) ulimitPrefix(timeout time.Duration) string {
 	var parts []string
 	if c.cfg.LocalMemoryBytes > 0 {
-		// -v is in KiB.
-		parts = append(parts, "ulimit -v "+strconv.FormatInt(c.cfg.LocalMemoryBytes/1024, 10))
+		// -v is in KiB. Deliberately NOT the memory cap: RLIMIT_AS counts
+		// virtual address space, which JIT runtimes inflate by design (see
+		// localRlimitASFloor). The memory hard cap lives in the cgroup
+		// controller (applyCgroupLimits); this is only the fallback layer.
+		parts = append(parts, "ulimit -v "+strconv.FormatInt(localRlimitASBytes(c.cfg.LocalMemoryBytes)/1024, 10))
 	}
 	if c.cfg.LocalPidsLimit > 0 {
 		nproc := int(c.cfg.LocalPidsLimit)

@@ -276,7 +276,12 @@ func TestLocalUlimitPrefix(t *testing.T) {
 	client.cfg.LocalCPULimit = 0.5
 	prefix := client.ulimitPrefix(60 * time.Second)
 	for _, want := range []string{
-		"ulimit -v " + strconv.FormatInt(256*1024, 10),
+		// RLIMIT_AS is deliberately NOT the memory cap: JIT runtimes reserve
+		// virtual address space far beyond RSS — V8 aborts with "Failed to
+		// reserve virtual memory for CodeRange" under a ceiling equal to the
+		// memory limit (verified: node v20 needs >512MB virtual just to boot).
+		// 256MB config → max(8x, 8GiB floor) = 8GiB, rendered in KiB.
+		"ulimit -v 8388608",
 		// PidsLimit=32 is below the per-real-uid floor: the kernel counts the
 		// host uid's own processes against RLIMIT_NPROC, so the rlimit layer
 		// must not go under localMinRlimitNproc.
@@ -286,6 +291,14 @@ func TestLocalUlimitPrefix(t *testing.T) {
 		if !strings.Contains(prefix, want) {
 			t.Fatalf("prefix %q missing %q", prefix, want)
 		}
+	}
+
+	// Large memory configs scale the address-space ceiling at 8x, past the
+	// floor: a 2GiB memory limit yields a 16GiB AS ceiling.
+	client.cfg.LocalMemoryBytes = 2 * 1024 * 1024 * 1024
+	prefix = client.ulimitPrefix(60 * time.Second)
+	if !strings.Contains(prefix, "ulimit -v 16777216") {
+		t.Fatalf("prefix %q missing 8x AS ceiling for large memory config", prefix)
 	}
 }
 
