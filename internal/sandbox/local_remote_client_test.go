@@ -5,6 +5,7 @@ package sandbox
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -33,11 +34,23 @@ func newLocalTestClient(t *testing.T) (*LocalRemoteClient, *Config) {
 	// when absent: the file-API and lifecycle tests do not exec anything.
 	if bb, err := os.Stat("/bin/busybox"); err == nil && !bb.IsDir() {
 		must(copyFileContents("/bin/busybox", filepath.Join(template, "bin", "busybox"), 0o755))
+		// Install EVERY applet symlink (cat, grep, wc, sleep, ...). sh alone
+		// is not enough: its builtin echo works, but anything the exec tests
+		// pipe through (cat | grep) needs the real applets on PATH.
+		install := exec.Command(filepath.Join(template, "bin", "busybox"),
+			"--install", "-s", filepath.Join(template, "bin"))
+		if out, ierr := install.CombinedOutput(); ierr != nil {
+			t.Fatalf("fixture: busybox --install: %v: %s", ierr, out)
+		}
 		must(os.Symlink("busybox", filepath.Join(template, "bin", "sh")))
 	} else {
 		must(os.WriteFile(filepath.Join(template, "bin", "sh"), []byte("#!/bin/busybox\n"), 0o755))
 	}
 	must(os.WriteFile(filepath.Join(template, "etc", "passwd"), []byte("root:x:0:0:root:/root:/bin/sh\n"), 0o644))
+	// The exec tests redirect to /dev/null; a runner user cannot mknod a real
+	// char device, but an empty regular file satisfies the open() just fine.
+	must(os.MkdirAll(filepath.Join(template, "dev"), 0o755))
+	must(os.WriteFile(filepath.Join(template, "dev", "null"), nil, 0o666))
 
 	cfg := DefaultConfig()
 	cfg.Type = SandboxTypeLocal
@@ -316,7 +329,7 @@ func TestLocalExecJail(t *testing.T) {
 		t.Fatalf("offline probe did not complete: %+v", result)
 	}
 	if lines := strings.TrimSpace(strings.SplitN(result.Stdout, "probe-done", 2)[0]); lines == "" {
-		t.Fatal("offline probe produced no output")
+		t.Fatalf("offline probe produced no output: %+v", result)
 	}
 
 	// 3. The host process table must not leak in (no /proc mount, PIDNS).
@@ -341,7 +354,7 @@ func TestLocalExecJail(t *testing.T) {
 		t.Fatalf("Exec timeout: %v", err)
 	}
 	if !result.Killed || time.Since(start) > 10*time.Second {
-		t.Fatalf("timeout kill failed: killed=%v took=%v", result.Killed, time.Since(start))
+		t.Fatalf("timeout kill failed: killed=%v took=%v result=%+v", result.Killed, time.Since(start), result)
 	}
 }
 
