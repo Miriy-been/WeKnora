@@ -10,13 +10,20 @@ name: CI
 #                      runs it inside a chroot with no libraries.
 #   - frontend-check:  a full npm build, which type-checks the Vue app.
 #
-# Each job only runs when its own tree changed, so a docs-only push skips both.
+# NOTE: paths filtering is only valid at the EVENT level in GitHub Actions
+# (a job-level "paths:" key is a syntax error), so both jobs run on any code
+# change. Each has its own compiler cache, and markdown-only pushes skip CI
+# entirely.
 
 on:
   push:
     branches:
       - "**"
+    paths-ignore:
+      - "**.md"
   pull_request:
+    paths-ignore:
+      - "**.md"
   workflow_dispatch:
 
 concurrency:
@@ -30,10 +37,6 @@ env:
 jobs:
   go-check:
     runs-on: ubuntu-24.04
-    paths-ignore:
-      - "frontend/**"
-      - "**.md"
-      - ".github/workflows/ci.yml"
     steps:
       - uses: actions/checkout@v6
 
@@ -55,9 +58,6 @@ jobs:
 
   frontend-check:
     runs-on: ubuntu-latest
-    paths:
-      - "frontend/**"
-      - ".github/workflows/ci.yml"
     steps:
       - uses: actions/checkout@v6
 
