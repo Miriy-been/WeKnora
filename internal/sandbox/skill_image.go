@@ -64,6 +64,13 @@ func SkillImageActive(tenantCfg *types.TenantSandboxConfig) bool {
 		) != ""
 	case SandboxTypeDocker:
 		return DockerSkillImageOverride(tenantCfg) != ""
+	case SandboxTypeLocal:
+		if tenantCfg.Local == nil {
+			return false
+		}
+		return skillImageTemplateOverride(
+			tenantCfg.SkillImage, "local", "", localSkillOwnerIdentity(tenantCfg.Local),
+		) != ""
 	}
 	return false
 }
@@ -86,8 +93,28 @@ func SkillOwnerFingerprint(tenantCfg *types.TenantSandboxConfig) string {
 		}
 	case SandboxTypeDocker:
 		return dockerSkillOwnerFingerprint(tenantCfg.Docker)
+	case SandboxTypeLocal:
+		if tenantCfg.Local != nil {
+			return SkillImageFingerprint("local", "", localSkillOwnerIdentity(tenantCfg.Local))
+		}
 	}
 	return ""
+}
+
+// localSkillOwnerIdentity stands in for the credential pair the other
+// backends fingerprint: a Local snapshot lives on this deployment's own
+// disk under the config's rootfs base, so that base (resolved to the
+// built-in default when blank, exactly like IdentityOf) IS the account.
+// Re-pointing it strands every snapshot — which is why it is already part
+// of SandboxIdentity and asks for confirmation in the UI.
+func localSkillOwnerIdentity(local *types.LocalSandboxConfig) string {
+	if local == nil {
+		return DefaultLocalRootfsBase
+	}
+	if base := strings.TrimSpace(local.RootfsBase); base != "" {
+		return base
+	}
+	return DefaultLocalRootfsBase
 }
 
 // dockerLocalDaemonIdentity stands in for a blank host in the fingerprint.

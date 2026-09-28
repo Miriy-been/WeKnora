@@ -178,6 +178,15 @@ func ResolveEffectiveConfig(
 		if snapshot := DockerSkillImageOverride(tenantCfg); snapshot != "" {
 			effective.DockerImage = snapshot
 		}
+	case SandboxTypeLocal:
+		// The stored local block IS the identity source: the fingerprint is
+		// the (defaulted) rootfs base, and the snapshot ID replaces the
+		// template path as the Create source (see resolveSnapshotSource).
+		if snapshot := skillImageTemplateOverride(
+			tenantCfg.SkillImage, "local", "", localSkillOwnerIdentity(tenantCfg.Local),
+		); snapshot != "" {
+			effective.LocalTemplatePath = snapshot
+		}
 	}
 	// Deliberately after the runtime defaults: TTLs and HTTP timeouts have
 	// built-in fallbacks, endpoints and credentials do not.

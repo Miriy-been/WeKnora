@@ -289,6 +289,67 @@ func TestLocalUlimitPrefix(t *testing.T) {
 	}
 }
 
+// TestLocalSnapshot pins the skill-image lifecycle: a session sandbox gains a
+// file, a snapshot is taken, a NEW sandbox boots from the snapshot (not the
+// template) and sees the file, and deleting the snapshot makes subsequent
+// snapshot boots fail as NotFound.
+func TestLocalSnapshot(t *testing.T) {
+	client, _ := newLocalTestClient(t)
+	ctx := context.Background()
+	if !client.Capabilities().SupportsSnapshots {
+		t.Fatal("Local must advertise SupportsSnapshots for the skill flow")
+	}
+
+	base, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "t"})
+	if err != nil {
+		t.Fatalf("Create base: %v", err)
+	}
+	if err := client.WriteFile(ctx, base, "/workspace/skill-data.txt", []byte("installed")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ref, err := client.CreateSnapshot(ctx, base.ID(), "with-skill")
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	if !validLocalSnapshotID(ref.ID) {
+		t.Fatalf("snapshot id %q violates our format", ref.ID)
+	}
+	list, err := client.ListSnapshots(ctx, "")
+	if err != nil || len(list) != 1 || list[0].ID != ref.ID {
+		t.Fatalf("ListSnapshots: %v / %+v", err, list)
+	}
+
+	// A fresh session boots FROM the snapshot and inherits the file.
+	child, err := client.Create(ctx, RemoteCreateRequest{TemplateID: ref.ID})
+	if err != nil {
+		t.Fatalf("Create from snapshot: %v", err)
+	}
+	got, err := client.ReadFile(ctx, child, "/workspace/skill-data.txt")
+	if err != nil || string(got) != "installed" {
+		t.Fatalf("snapshot restore lost the file: %v / %q", err, got)
+	}
+
+	// The pristine template does NOT have it.
+	pristine, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "t"})
+	if err != nil {
+		t.Fatalf("Create pristine: %v", err)
+	}
+	if _, err := client.ReadFile(ctx, pristine, "/workspace/skill-data.txt"); err == nil {
+		t.Fatal("pristine template must not contain the skill file")
+	}
+
+	if err := client.DeleteSnapshot(ctx, ref.ID); err != nil {
+		t.Fatalf("DeleteSnapshot: %v", err)
+	}
+	if err := client.DeleteSnapshot(ctx, ref.ID); err != nil {
+		t.Fatalf("DeleteSnapshot twice must be idempotent: %v", err)
+	}
+	if _, err := client.Create(ctx, RemoteCreateRequest{TemplateID: ref.ID}); err == nil {
+		t.Fatal("Create from a deleted snapshot must fail")
+	}
+}
+
 func TestLocalBuildEnvNoHostLeakage(t *testing.T) {
 	client, _ := newLocalTestClient(t)
 	t.Setenv("SECRET_HOST_VALUE", "leak")

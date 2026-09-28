@@ -113,11 +113,14 @@ func (c *LocalRemoteClient) Provider() RemoteProvider { return SandboxTypeLocal 
 // Capabilities advertises what this client supports natively. Reconnect is
 // inherent (the directory is the state); pause/resume and timeout refresh are
 // not — Delete is the only reclamation, guarded by the orphan sweep.
+// Snapshots are directory-tree copies (see local_snapshot.go), which is what
+// makes the skill install/remove flow a first-class citizen here.
 func (c *LocalRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
-		SupportsReconnect:     true,
-		SupportsMetadata:      true,
-		SupportsListSandboxes: true,
+		SupportsReconnect:      true,
+		SupportsMetadata:       true,
+		SupportsListSandboxes:  true,
+		SupportsSnapshots:      true,
 	}
 }
 
@@ -183,10 +186,16 @@ func (c *LocalRemoteClient) Create(
 		return nil, localErrWrapped("Create", RemoteErrorKindInternal, err, "generate sandbox id")
 	}
 	dir := filepath.Join(rootfs, id)
-	if err := copyTree(c.cfg.LocalTemplatePath, dir); err != nil {
+	// The template is either the pristine /sandbox-rootfs or, when the skill
+	// flow boots a session from an installed-skills image, a snapshot copy.
+	srcDir, err := c.resolveSnapshotSource(req.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if err := copyTree(srcDir, dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, localErrWrapped("Create", RemoteErrorKindInternal, err,
-			"materialise rootfs from template %s", c.cfg.LocalTemplatePath)
+			"materialise rootfs from %s", srcDir)
 	}
 
 	record := localCreateRecord{

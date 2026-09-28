@@ -115,6 +115,9 @@ func spawnTemplateID(cfg *types.TenantSandboxConfig) string {
 		if cfg.Docker != nil {
 			return strings.TrimSpace(cfg.Docker.Image)
 		}
+	case sandbox.SandboxTypeLocal:
+		// Same reasoning as currentBaseTemplate: one fixed image-baked template.
+		return sandbox.DefaultLocalTemplatePath
 	}
 	return ""
 }

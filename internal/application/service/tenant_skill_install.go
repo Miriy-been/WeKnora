@@ -2454,6 +2454,10 @@ func currentBaseTemplate(cfg *types.TenantSandboxConfig) string {
 		if cfg.Docker != nil {
 			return cfg.Docker.Image
 		}
+	case sandbox.SandboxTypeLocal:
+		// The Local backend has exactly one pristine template, baked into the
+		// image at a fixed path; it needs no per-config field.
+		return sandbox.DefaultLocalTemplatePath
 	}
 	return ""
 }
