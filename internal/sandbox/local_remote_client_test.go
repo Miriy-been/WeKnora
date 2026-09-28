@@ -42,10 +42,28 @@ func newLocalTestClient(t *testing.T) (*LocalRemoteClient, *Config) {
 		if out, ierr := install.CombinedOutput(); ierr != nil {
 			t.Fatalf("fixture: busybox --install: %v: %s", ierr, out)
 		}
-		// --install normally creates sh itself; keep this only as a guard for
-		// builds whose applet list lacks it.
-		if err := os.Symlink("busybox", filepath.Join(template, "bin", "sh")); err != nil && !os.IsExist(err) {
-			t.Fatalf("fixture: symlink sh: %v", err)
+		// busybox --install links point at its own exec path ("/proc/self/exe"
+		// or the absolute argv[0]), which is meaningless inside a chroot where
+		// /proc is absent. Rewrite every symlink to a RELATIVE "busybox" — the
+		// production image build must do the same (see wek/Dockerfile).
+		entries, rerr := os.ReadDir(filepath.Join(template, "bin"))
+		if rerr != nil {
+			t.Fatalf("fixture: read bin: %v", rerr)
+		}
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink == 0 {
+				continue
+			}
+			p := filepath.Join(template, "bin", entry.Name())
+			if target, lerr := os.Readlink(p); lerr != nil || target == "busybox" {
+				continue
+			}
+			if err := os.Remove(p); err != nil {
+				t.Fatalf("fixture: relink %s: %v", p, err)
+			}
+			if err := os.Symlink("busybox", p); err != nil {
+				t.Fatalf("fixture: relink %s: %v", p, err)
+			}
 		}
 	} else {
 		must(os.WriteFile(filepath.Join(template, "bin", "sh"), []byte("#!/bin/busybox\n"), 0o755))
