@@ -253,7 +253,10 @@ builtin_agents:
       system_prompt_id: "skill_installer"
       temperature: 0.2
       max_completion_tokens: 24576
-      max_iterations: 30
+      # 60 而非 30：LLM 安装路径非确定，环境修复型安装（补运行时/库）容易把
+      # 30 轮全部烧完 → install-report.json 缺失 → 安装判失败（实测两次）。
+      # 模板已内置 node 与常用依赖后常规安装只需几轮，60 只是兜底上限
+      max_iterations: 60
       kb_selection_mode: "none"
       retrieve_kb_only_when_mentioned: false
       # The install path unions these three in regardless of what is written

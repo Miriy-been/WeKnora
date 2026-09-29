@@ -71,6 +71,17 @@ export function getCurrentLanguage(): string {
 
 instance.interceptors.request.use(
   (config) => {
+    // ModelScope/EAS 平台网关按 HTTP 方法做白名单：DELETE/PUT/PATCH 会被
+    // 403 "unauthorized method" 直接拒掉（请求根本到不了容器，实测 2026-09-29）。
+    // 改发 POST + X-HTTP-Method-Override 头：网关对 X- 前缀头透传
+    // （X-WeKnora-Token 已验证），容器内 nginx 用 proxy_method 还原真方法。
+    // 401 重试路径复用已改写的 config，天然幂等，不会二次覆盖。
+    const httpMethod = (config.method || '').toLowerCase();
+    if (httpMethod === 'delete' || httpMethod === 'put' || httpMethod === 'patch') {
+      config.headers['X-HTTP-Method-Override'] = httpMethod.toUpperCase();
+      config.method = 'post';
+    }
+
     const existingAuth = config.headers?.Authorization ?? config.headers?.authorization;
     const isEmbedAuth = typeof existingAuth === 'string' && existingAuth.startsWith('Embed ');
     const isEmbedPath = typeof config.url === 'string' && config.url.includes('/api/v1/embed/');
