@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -163,7 +164,27 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("qqbot api %s %s failed: %s", method, url, resp.Status)
+		// A 401 from a token-authenticated call means the token we sent is no
+		// longer accepted. Drop the cached token so the next AccessToken()
+		// fetches a fresh one — otherwise a reconnect loop keeps retrying with
+		// the same dead token until the local expiry fires (QQ tokens live 2h,
+		// so a prematurely-invalidated token poisons every retry for hours;
+		// observed as a multi-hour 401 storm on the gateway endpoint).
+		if resp.StatusCode == http.StatusUnauthorized && !strings.Contains(url, "getAppAccessToken") {
+			c.mu.Lock()
+			c.accessToken = ""
+			c.expiresAt = time.Time{}
+			c.mu.Unlock()
+		}
+		// The platform puts the actionable reason in the JSON body (e.g.
+		// 11243 wrong token, 11265 bot banned, 11254 interface forbidden);
+		// resp.Status alone hides it and makes log-only diagnosis impossible.
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		msg := strings.TrimSpace(string(detail))
+		if msg == "" {
+			return fmt.Errorf("qqbot api %s %s failed: %s", method, url, resp.Status)
+		}
+		return fmt.Errorf("qqbot api %s %s failed: %s: %s", method, url, resp.Status, msg)
 	}
 	if out == nil {
 		return nil
