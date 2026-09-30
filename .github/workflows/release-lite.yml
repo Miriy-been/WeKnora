@@ -95,33 +95,34 @@ jobs:
 
       - name: Build
         run: |
-          export EDITION=lite
+          # Web 二进制按官方默认 EDITION=standard 构建（get_version.sh 默认值），
+          # 与官方标准版对齐；桌面端 job 仍固定 lite
           eval "$(./scripts/get_version.sh env)"
           LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
           export CGO_CFLAGS="-Wno-deprecated-declarations"
           if [ "${{ matrix.goos }}" = "darwin" ]; then
             export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
             go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
-              -o WeKnora-lite ./cmd/server
+              -o WeKnora ./cmd/server
           else
             # ModelScope 部署：docreader 基座是 debian bookworm(glibc 2.36)，
             # 在 golang:1.26-bookworm 容器内编译，保证二进制只依赖 glibc 2.36
             docker run --rm -v "$PWD:/src" -w /src \
-              -e CGO_ENABLED=1 -e EDITION=lite -e LDFLAGS="${LDFLAGS}" \
+              -e CGO_ENABLED=1 -e LDFLAGS="${LDFLAGS}" \
               -e CGO_CFLAGS="-Wno-deprecated-declarations" \
               golang:1.26-bookworm bash -c '
                 git config --global --add safe.directory /src &&
                 apt-get update -qq && apt-get install -y -qq libsqlite3-dev >/dev/null &&
                 go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
-                  -o WeKnora-lite ./cmd/server
+                  -o WeKnora ./cmd/server
               '
           fi
 
       - name: Package tarball
         run: |
-          ARCHIVE="WeKnora-lite_${{ steps.ver.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          ARCHIVE="WeKnora_${{ steps.ver.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
           mkdir -p "${ARCHIVE}/web"
-          cp WeKnora-lite "${ARCHIVE}/"
+          cp WeKnora "${ARCHIVE}/"
           bash ./scripts/copy-licenses.sh "${ARCHIVE}"
           cp -r web/* "${ARCHIVE}/web/"
           cp .env.lite.example "${ARCHIVE}/"
@@ -143,8 +144,8 @@ jobs:
         with:
           name: release-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            WeKnora-lite_*.tar.gz
-            WeKnora-lite_*.tar.gz.sha256
+            WeKnora_*.tar.gz
+            WeKnora_*.tar.gz.sha256
           retention-days: 3
 
   # ── 2b. Build Desktop APP per platform (Wails) ──
@@ -372,8 +373,8 @@ jobs:
 
           ```bash
           # 1. 解压
-          tar xzf WeKnora-lite_${{ steps.ver.outputs.version }}_<os>_<arch>.tar.gz
-          cd WeKnora-lite_${{ steps.ver.outputs.version }}_<os>_<arch>
+          tar xzf WeKnora_${{ steps.ver.outputs.version }}_<os>_<arch>.tar.gz
+          cd WeKnora_${{ steps.ver.outputs.version }}_<os>_<arch>
 
           # 2. 配置
           cp .env.lite.example .env.lite
@@ -386,16 +387,16 @@ jobs:
 
           # 4. 运行
           set -a && source .env.lite && set +a
-          ./WeKnora-lite
+          ./WeKnora
           # 访问 http://localhost:8080
           ```
 
           | 文件 | 平台 |
           |------|------|
-          | `WeKnora-lite_*_linux_amd64.tar.gz` | Linux x86_64 |
-          | `WeKnora-lite_*_linux_arm64.tar.gz` | Linux ARM64 |
-          | `WeKnora-lite_*_darwin_amd64.tar.gz` | macOS Intel |
-          | `WeKnora-lite_*_darwin_arm64.tar.gz` | macOS Apple Silicon |
+          | `WeKnora_*_linux_amd64.tar.gz` | Linux x86_64 |
+          | `WeKnora_*_linux_arm64.tar.gz` | Linux ARM64 |
+          | `WeKnora_*_darwin_amd64.tar.gz` | macOS Intel |
+          | `WeKnora_*_darwin_arm64.tar.gz` | macOS Apple Silicon |
 
           ---
 
@@ -421,8 +422,8 @@ jobs:
           gh release create "${{ steps.ver.outputs.version }}" \
             --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
             --notes-file notes.md \
-            WeKnora-lite_*.tar.gz \
-            WeKnora-lite_*.tar.gz.sha256 \
+            WeKnora_*.tar.gz \
+            WeKnora_*.tar.gz.sha256 \
             WeKnora-Lite-App_* || true
 
   # ── 4. Update Homebrew Formula ──

@@ -30,6 +30,9 @@ logs/
 
 WeKnora
 WeKnora-lite
+# 本地编译/组包产物（build-local.sh 生成，勿提交）
+WeKnora-local
+WeKnora_*
 cmd/desktop/build/bin/
 /models/
 test/data/mswag.txt

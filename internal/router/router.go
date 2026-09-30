@@ -166,10 +166,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		r.Use(embedFrameAncestorsMiddleware(params.EmbedChannelService))
 	}
 
-	// 前端静态文件（仅 Lite 版本内嵌前端）
-	if handler.Edition == "lite" {
-		serveFrontendStatic(r)
-	}
+	// 前端静态文件：web/ 目录存在即托管（官方标准版镜像不含 web/，
+	// serveFrontendStatic 对缺失目录自守返回，标准 compose 部署行为不变；
+	// 单容器部署因此无需区分 lite/standard 即可内嵌前端）
+	serveFrontendStatic(r)
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
