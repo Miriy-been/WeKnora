@@ -134,6 +134,12 @@ jobs:
             mkdir -p "${ARCHIVE}/migrations/sqlite"
             cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
           fi
+          # PG 主库迁移线：DB_DRIVER=postgres 时应用走 file://migrations/versioned
+          # （114+ 迁移，000002 等为条件迁移，skip_embedding 时自动跳过）
+          if [ -d migrations/versioned ]; then
+            mkdir -p "${ARCHIVE}/migrations/versioned"
+            cp -r migrations/versioned/* "${ARCHIVE}/migrations/versioned/"
+          fi
           if [ -f deploy/weknora-lite.service ]; then
             cp deploy/weknora-lite.service "${ARCHIVE}/"
           fi
@@ -310,6 +316,12 @@ jobs:
           if [ -d migrations/sqlite ]; then
             mkdir -p "${ARCHIVE}/migrations/sqlite"
             cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
+          fi
+          # PG 主库迁移线：DB_DRIVER=postgres 时应用走 file://migrations/versioned
+          # （114+ 迁移，000002 等为条件迁移，skip_embedding 时自动跳过）
+          if [ -d migrations/versioned ]; then
+            mkdir -p "${ARCHIVE}/migrations/versioned"
+            cp -r migrations/versioned/* "${ARCHIVE}/migrations/versioned/"
           fi
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
