@@ -26,10 +26,11 @@ type LongConnClient struct {
 	client  *Client
 	handler MessageHandler
 
-	mu     sync.Mutex
-	conn   *ws.Conn
-	seq    *int64
-	closed bool
+	mu        sync.Mutex
+	conn      *ws.Conn
+	seq       *int64
+	sessionID *string // READY 事件下发的会话 id；非空时断线重连走 op6 Resume
+	closed    bool
 
 	// keepalive is the current watchdog deadline: how long the connection may
 	// go without ANY inbound frame before the read deadline fires, ReadMessage
@@ -144,6 +145,18 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 				return err
 			}
 		case opDispatch:
+			// READY 事件携带 session_id：保存后断线重连可走 op6 Resume
+			// （官方推荐：断开重连不需要重新 Identify，Resume 会补发断线期间事件）
+			if payload.T == "READY" {
+				var rd readyData
+				if err := json.Unmarshal(payload.D, &rd); err == nil && rd.SessionID != "" {
+					c.mu.Lock()
+					sid := rd.SessionID
+					c.sessionID = &sid
+					c.mu.Unlock()
+					logger.Infof(ctx, "[QQBot] session established: %s", sid)
+				}
+			}
 			msg, err := parseGatewayPayload(&payload)
 			if err != nil {
 				logger.Warnf(ctx, "[QQBot] parse event failed: %v", err)
@@ -154,8 +167,17 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 					logger.Errorf(ctx, "[QQBot] handle message failed: %v", err)
 				}
 			}
-		case opReconnect, opInvalidSession:
-			return fmt.Errorf("gateway requested reconnect op=%d", payload.Op)
+		case opReconnect:
+			// 网关要求重连：保留 session，重连循环会走 op6 Resume 恢复会话
+			return fmt.Errorf("gateway requested reconnect op=7")
+		case opInvalidSession:
+			// 会话失效（Resume 被拒等）：清掉会话，重连循环回退 op2 Identify
+			c.mu.Lock()
+			c.sessionID = nil
+			c.seq = nil
+			c.mu.Unlock()
+			logger.Warnf(ctx, "[QQBot] invalid session (op=9), will re-identify on reconnect")
+			return fmt.Errorf("gateway sent invalid session op=9")
 		case opHeartbeatACK:
 		}
 	}
@@ -173,17 +195,41 @@ func (c *LongConnClient) handleHello(ctx context.Context, conn *ws.Conn, raw jso
 	if err != nil {
 		return err
 	}
-	identify := identifyData{
-		Token:   "QQBot " + token,
-		Intents: intentGroupAndC2C,
-		Shard:   []int{0, 1},
-	}
-	payloadBytes, err := json.Marshal(identify)
-	if err != nil {
-		return err
-	}
-	if err := conn.WriteJSON(gatewayPayload{Op: opIdentify, D: payloadBytes}); err != nil {
-		return err
+	c.mu.Lock()
+	sid := c.sessionID
+	seq := c.seq
+	c.mu.Unlock()
+	if sid != nil && seq != nil {
+		// 官方推荐（QQ 开放平台 ws 文档 + 官方 Node SDK 同款设计）：断开重连
+		// 不需要重新 Identify，发 OpCode 6 Resume 恢复会话，网关会补发断线
+		// 期间的事件，会话与事件流不中断。Resume 被拒时网关下发 op9
+		// invalid session，connectAndRun 会清会话并走 Identify 回退。
+		resume := resumeData{
+			Token:     "QQBot " + token,
+			SessionID: *sid,
+			Seq:       *seq,
+		}
+		payloadBytes, err := json.Marshal(resume)
+		if err != nil {
+			return err
+		}
+		if err := conn.WriteJSON(gatewayPayload{Op: opResume, D: payloadBytes}); err != nil {
+			return err
+		}
+		logger.Infof(ctx, "[QQBot] resuming session %s (seq=%d)", *sid, *seq)
+	} else {
+		identify := identifyData{
+			Token:   "QQBot " + token,
+			Intents: intentGroupAndC2C,
+			Shard:   []int{0, 1},
+		}
+		payloadBytes, err := json.Marshal(identify)
+		if err != nil {
+			return err
+		}
+		if err := conn.WriteJSON(gatewayPayload{Op: opIdentify, D: payloadBytes}); err != nil {
+			return err
+		}
 	}
 	// The gateway told us its heartbeat cadence; tighten the watchdog from
 	// the floor to two missed cycles so a kicked connection is noticed fast.
@@ -196,11 +242,19 @@ func (c *LongConnClient) handleHello(ctx context.Context, conn *ws.Conn, raw jso
 func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	counter := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			counter++
+			// 观测日志：每 10 次心跳（约 7.5 分钟）打一条，用于定位"服务端 30+ 分钟
+			// 主动 RST"时心跳是否一直存活——若日志显示心跳持续到 RST 前一刻，
+			// 则排除客户端心跳缺失，指向服务端/链路侧清理
+			if counter == 1 || counter%10 == 0 {
+				logger.Infof(ctx, "[QQBot] heartbeat #%d sent (interval=%v)", counter, interval)
+			}
 			heartbeat, err := c.heartbeatPayload()
 			if err == nil {
 				err = conn.WriteJSON(heartbeat)
@@ -209,6 +263,7 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn, inter
 				// A failed heartbeat write means the connection is dead from
 				// our side; close it so the read loop unblocks immediately
 				// instead of waiting out the watchdog deadline.
+				logger.Warnf(ctx, "[QQBot] heartbeat write failed at #%d: %v", counter, err)
 				_ = conn.Close()
 				return
 			}

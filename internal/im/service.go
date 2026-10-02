@@ -224,6 +224,13 @@ const (
 	wsLeaderRenewInterval = 5 * time.Second
 	// wsLeaderRetryInterval is how often non-leader instances try to acquire the lock.
 	wsLeaderRetryInterval = 10 * time.Second
+	// wsLeaderRenewalGrace is how many consecutive failed renewals the leader
+	// tolerates before tearing down its adapter (≈ one full TTL window at the
+	// 5s renew interval). A single transient Redis stall must not kill a
+	// healthy long connection: that wipes the QQBot session state and forces
+	// a fresh Identify with minutes of offline time (observed 2026-10-01:
+	// one renewal hiccup → adapter killed → 4-12 min offline per event).
+	wsLeaderRenewalGrace = 3
 	// stopMarkerTTL is the TTL for cross-instance /stop markers in Redis.
 	stopMarkerTTL = 30 * time.Second
 	// stopPollInterval is how often in-flight workers check for remote /stop signals.
@@ -1276,24 +1283,52 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 	ticker := time.NewTicker(wsLeaderRenewInterval)
 	defer ticker.Stop()
 
+	renewFailures := 0
 	for {
 		select {
 		case <-ticker.C:
-			// Only renew if we still own the lock.
+			// Renew while we still own the lock; re-acquire it if it expired
+			// but nobody else took over (we never stopped being the live
+			// connection, so reclaiming is safe and avoids tearing down the
+			// adapter — and with it the QQBot session — for a transient stall).
+			// Returns: 1 = renewed, 2 = re-acquired after expiry, 0 = key
+			// owned by another instance.
 			script := redis.NewScript(`
-				if redis.call('GET', KEYS[1]) == ARGV[1] then
+				local cur = redis.call('GET', KEYS[1])
+				if cur == ARGV[1] then
 					redis.call('PEXPIRE', KEYS[1], ARGV[2])
 					return 1
+				end
+				if not cur then
+					redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+					return 2
 				end
 				return 0
 			`)
 			result, err := script.Run(ctx, s.redis, []string{key}, s.instanceID, wsLeaderTTL.Milliseconds()).Int64()
 			if err != nil || result == 0 {
+				renewFailures++
+				// err = Redis error (transient stall), result=0 = another
+				// instance owns the key. Both get wsLeaderRenewalGrace rounds
+				// before teardown; a single Redis hiccup used to kill the
+				// connection instantly.
 				logger.Warnf(context.Background(),
-					"[IM] Lost leadership for channel %s, stopping adapter and scheduling recovery", channelID)
-				s.handleWSLeadershipLoss(channelID)
-				return
+					"[IM] Leader renewal failed for channel %s (round %d/%d, result=%d): %v",
+					channelID, renewFailures, wsLeaderRenewalGrace, result, err)
+				if renewFailures >= wsLeaderRenewalGrace {
+					logger.Warnf(context.Background(),
+						"[IM] Lost leadership for channel %s after %d failed renewals, stopping adapter and scheduling recovery",
+						channelID, renewFailures)
+					s.handleWSLeadershipLoss(channelID)
+					return
+				}
+				continue
 			}
+			if result == 2 {
+				logger.Warnf(context.Background(),
+					"[IM] Leader lock for channel %s re-acquired after expiry (connection kept)", channelID)
+			}
+			renewFailures = 0
 			// Still the leader — verify the channel is still active. A
 			// delete/disable is served by whichever instance got the HTTP
 			// request; without this check the leader would keep the long

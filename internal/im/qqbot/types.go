@@ -10,6 +10,7 @@ const (
 	opDispatch        = 0
 	opHeartbeat       = 1
 	opIdentify        = 2
+	opResume          = 6
 	opReconnect       = 7
 	opInvalidSession  = 9
 	opHello           = 10
@@ -39,6 +40,19 @@ type identifyData struct {
 	Token   string `json:"token"`
 	Intents int    `json:"intents"`
 	Shard   []int  `json:"shard,omitempty"`
+}
+
+// resumeData 用于断线重连时恢复会话（官方推荐：断开重连不需要重新 Identify，
+// 发 OpCode 6 Resume 后网关会补发断线期间的事件，会话与事件流不中断）。
+type resumeData struct {
+	Token     string `json:"token"`
+	SessionID string `json:"session_id"`
+	Seq       int64  `json:"seq"`
+}
+
+// readyData 是鉴权成功后网关下发的 READY 事件负载，携带会话 id。
+type readyData struct {
+	SessionID string `json:"session_id"`
 }
 
 type tokenResponse struct {
