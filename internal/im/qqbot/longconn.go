@@ -22,6 +22,14 @@ type MessageHandler func(ctx context.Context, msg *im.IncomingMessage) error
 // var so tests can shrink it instead of sleeping for 90 seconds.
 var minKeepaliveTimeout = 90 * time.Second
 
+// reconnectBackoffResetAfter is how long a connection must stay up before the
+// next reconnect restarts from the base delay. connectAndRun only ever returns
+// on a lost connection, so without this the attempt counter would climb for the
+// whole process lifetime and every later reconnect — even one after hours of a
+// stable session — would sit at the 30s cap. A package var so tests can shrink
+// it instead of holding a connection open for a minute.
+var reconnectBackoffResetAfter = 60 * time.Second
+
 type LongConnClient struct {
 	client  *Client
 	handler MessageHandler
@@ -62,21 +70,25 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := c.connectAndRun(ctx); err != nil {
-			if ctx.Err() != nil || c.isClosed() {
-				return ctx.Err()
-			}
-			attempt++
-			delay := reconnectDelay(attempt)
-			logger.Warnf(ctx, "[QQBot] connection lost: %v, reconnecting in %v", err, delay)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-			continue
+		startedAt := time.Now()
+		err := c.connectAndRun(ctx)
+		if ctx.Err() != nil || c.isClosed() {
+			return ctx.Err()
 		}
-		attempt = 0
+		// The gateway rotates sessions roughly hourly (op=7), so a connection
+		// that stayed up well past one rotation must not inherit the backoff
+		// that earlier short-lived attempts accumulated.
+		if time.Since(startedAt) >= reconnectBackoffResetAfter {
+			attempt = 0
+		}
+		attempt++
+		delay := reconnectDelay(attempt)
+		logger.Warnf(ctx, "[QQBot] connection lost: %v, reconnecting in %v", err, delay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
 	}
 }
 
@@ -112,6 +124,14 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		c.mu.Unlock()
 		_ = conn.Close()
 	}()
+	// The heartbeat goroutine must live and die with THIS connection. Registered
+	// after the cleanup defer above, so it runs first (defers are LIFO) and the
+	// goroutine sees a cancelled context before the socket is closed — otherwise
+	// every reconnect leaves the previous goroutine ticking until it trips over
+	// the closed socket ("heartbeat write failed ... use of closed network
+	// connection").
+	connCtx, cancelConn := context.WithCancel(ctx)
+	defer cancelConn()
 
 	// Watchdog: arm the read deadline before the first read. Any inbound
 	// frame (dispatch, heartbeat ACK, control frame) re-arms it; if the
@@ -137,11 +157,13 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 			continue
 		}
 		if payload.S != nil {
+			c.mu.Lock()
 			c.seq = payload.S
+			c.mu.Unlock()
 		}
 		switch payload.Op {
 		case opHello:
-			if err := c.handleHello(ctx, conn, payload.D); err != nil {
+			if err := c.handleHello(connCtx, conn, payload.D); err != nil {
 				return err
 			}
 		case opDispatch:
@@ -262,8 +284,12 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn, inter
 			if err != nil {
 				// A failed heartbeat write means the connection is dead from
 				// our side; close it so the read loop unblocks immediately
-				// instead of waiting out the watchdog deadline.
-				logger.Warnf(ctx, "[QQBot] heartbeat write failed at #%d: %v", counter, err)
+				// instead of waiting out the watchdog deadline. When the context
+				// is already cancelled this connection is being replaced, so the
+				// failure is expected teardown noise, not a warning.
+				if ctx.Err() == nil {
+					logger.Warnf(ctx, "[QQBot] heartbeat write failed at #%d: %v", counter, err)
+				}
 				_ = conn.Close()
 				return
 			}

@@ -68,18 +68,22 @@ func parseGatewayPayload(payload *gatewayPayload) (*im.IncomingMessage, error) {
 	if payload == nil || payload.Op != opDispatch {
 		return nil, nil
 	}
+	// Check the event type BEFORE decoding D. The gateway also emits dispatch
+	// frames that are not messages — e.g. the system event sent right after a
+	// Resume, whose d is a JSON string. Decoding those into messageEvent failed
+	// on every reconnect and logged a warning; the frame is not a user message,
+	// so it must simply be ignored without touching D.
+	if payload.T != eventC2CMessageCreate && payload.T != eventGroupAtMessageCreate {
+		return nil, nil
+	}
 	var event messageEvent
 	if err := json.Unmarshal(payload.D, &event); err != nil {
 		return nil, err
 	}
-	switch payload.T {
-	case eventC2CMessageCreate:
-		return parseC2CMessage(&event), nil
-	case eventGroupAtMessageCreate:
+	if payload.T == eventGroupAtMessageCreate {
 		return parseGroupMessage(&event), nil
-	default:
-		return nil, nil
 	}
+	return parseC2CMessage(&event), nil
 }
 
 func parseC2CMessage(event *messageEvent) *im.IncomingMessage {

@@ -224,13 +224,22 @@ const (
 	wsLeaderRenewInterval = 5 * time.Second
 	// wsLeaderRetryInterval is how often non-leader instances try to acquire the lock.
 	wsLeaderRetryInterval = 10 * time.Second
-	// wsLeaderRenewalGrace is how many consecutive failed renewals the leader
-	// tolerates before tearing down its adapter (≈ one full TTL window at the
-	// 5s renew interval). A single transient Redis stall must not kill a
-	// healthy long connection: that wipes the QQBot session state and forces
-	// a fresh Identify with minutes of offline time (observed 2026-10-01:
-	// one renewal hiccup → adapter killed → 4-12 min offline per event).
+	// wsLeaderRenewalGrace is how many renewals that find the lease owned by
+	// ANOTHER instance the leader tolerates before tearing down its adapter
+	// (≈ one full TTL window at the 5s renew interval). A real ownership
+	// conflict must be resolved fast, otherwise two instances keep long
+	// connections alive and the platform kicks one of them in a loop. Rounds
+	// where Redis itself is unreachable are skipped WITHOUT resetting this
+	// counter — they teach us nothing about ownership, and erring towards a
+	// prompt teardown is the safe side once a conflict is confirmed.
+	//
+	// Redis being unreachable is NOT an ownership conflict and does not by
+	// itself count against this grace — see the handling in wsLeaderRenewLoop.
 	wsLeaderRenewalGrace = 3
+	// wsLeaderRedisErrorLogEvery throttles the "redis unavailable" renewal log
+	// to one line per this many rounds (≈ 5 min at the 5s renew interval). An
+	// extended Redis outage must not flood the space log with one line per tick.
+	wsLeaderRedisErrorLogEvery = 60
 	// stopMarkerTTL is the TTL for cross-instance /stop markers in Redis.
 	stopMarkerTTL = 30 * time.Second
 	// stopPollInterval is how often in-flight workers check for remote /stop signals.
@@ -1284,6 +1293,7 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 	defer ticker.Stop()
 
 	renewFailures := 0
+	redisErrorRounds := 0
 	for {
 		select {
 		case <-ticker.C:
@@ -1306,15 +1316,31 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				return 0
 			`)
 			result, err := script.Run(ctx, s.redis, []string{key}, s.instanceID, wsLeaderTTL.Milliseconds()).Int64()
-			if err != nil || result == 0 {
+			if err != nil {
+				// Redis itself is unreachable: the lease can neither be renewed
+				// nor read, so its state says nothing about who owns this
+				// connection. Tearing the adapter down here only converts a
+				// Redis outage into a self-inflicted IM outage — observed
+				// 2026-10-06, ~2h of AOF MISCONF errors → 3 failed renewals →
+				// adapter stopped → QQBot offline for the whole window.
+				// No other instance can claim the lease while Redis is down
+				// either, so keep the long connection and retry; ownership is
+				// re-verified by the script the moment Redis answers again
+				// (result==0 below still tears down a real conflict).
+				redisErrorRounds++
+				if redisErrorRounds == 1 || redisErrorRounds%wsLeaderRedisErrorLogEvery == 0 {
+					logger.Warnf(context.Background(),
+						"[IM] Leader renewal skipped for channel %s (redis unavailable, %d consecutive rounds): %v; keeping connection",
+						channelID, redisErrorRounds, err)
+				}
+				continue
+			}
+			redisErrorRounds = 0
+			if result == 0 {
 				renewFailures++
-				// err = Redis error (transient stall), result=0 = another
-				// instance owns the key. Both get wsLeaderRenewalGrace rounds
-				// before teardown; a single Redis hiccup used to kill the
-				// connection instantly.
 				logger.Warnf(context.Background(),
-					"[IM] Leader renewal failed for channel %s (round %d/%d, result=%d): %v",
-					channelID, renewFailures, wsLeaderRenewalGrace, result, err)
+					"[IM] Leader renewal failed for channel %s (round %d/%d): another instance owns the lease",
+					channelID, renewFailures, wsLeaderRenewalGrace)
 				if renewFailures >= wsLeaderRenewalGrace {
 					logger.Warnf(context.Background(),
 						"[IM] Lost leadership for channel %s after %d failed renewals, stopping adapter and scheduling recovery",
